@@ -1,0 +1,11 @@
+# Виртуальное окружение
+lunokhod/
+venv/
+
+# Кэш Python
+__pycache__/
+*.pyc
+
+# Системные файлы
+.DS_Store
+*.log
