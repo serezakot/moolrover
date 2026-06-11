@@ -16,10 +16,10 @@ int main(){
 	RCC_APB2ENR=RCC_APB2ENR & (~(1<<14));/*вклчаем тактирвоание ЮСАРТ 1 сначала обнуляем биты потом устанавливаем*/
 	RCC_APB2ENR=RCC_APB2ENR | (1<<14);
 
-	GPIOA_CRH=GPIOA_CRH & (~(0xB<<4));/*PA9 TX in ALTERNATE FUCNTION PUSH-UP*/
+	GPIOA_CRH=GPIOA_CRH & (~(0xF<<4));/*PA9 TX in ALTERNATE FUCNTION PUSH-UP*/
 	GPIOA_CRH=GPIOA_CRH | (0xB<<4);
 
-	GPIOA_CRH=GPIOA_CRH & (~(0x4<<8));/*Enabling PA10 in floating input*/
+	GPIOA_CRH=GPIOA_CRH & (~(0xF<<8));/*Enabling PA10 in floating input*/
 	GPIOA_CRH=GPIOA_CRH | (0x4<<8);
 
 

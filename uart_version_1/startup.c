@@ -10,7 +10,7 @@ extern uint32_t _ebss;
 int main(void);
 
 /*Function that will works first when everything is turning on*/
-void Reset_Handler(void){
+void Reset_handler(void){
 	/*Коприуем инциализирвоаныее перменные бсс из ФЛЕШ В РАМ пока не надо но на будущее надо*/
 	uint32_t * bss_ptr=&_sbss;
 	/*Обнуляем секцию bss*/
@@ -32,7 +32,7 @@ void Reset_Handler(void){
 __attribute__((section(".isr_vector")))
 void * vectors[]={
 	(void*)STACK_TOP,
-	Reset_Handler
+	Reset_handler
 };
 
 
