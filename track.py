@@ -2,11 +2,9 @@ from flask import Flask, Response
 from picamera2 import Picamera2
 from ultralytics import YOLO
 import cv2
-from navigation import decide, target_angle
+from navigation import decide, target_angle, choose_target, box_confidence, CONFIDENCE_THRESHOLD
 from libcamera import controls
 import numpy as np
-
-from navigation import decide   # наш "мозг"
 
 
 
@@ -76,12 +74,15 @@ def generate_frames():
 
         annotated = results[0].plot()
 
-        #  достаём координаты боксов и спрашиваем "мозг"
+        #  достаём координаты боксов + уверенность YOLO и спрашиваем "мозг"
         detections = []
         boxes = results[0].boxes
         if boxes is not None and boxes.xyxy is not None:
-            for x1, y1, x2, y2 in boxes.xyxy.tolist():
-                detections.append((x1, y1, x2, y2))
+            coords = boxes.xyxy.tolist()
+            # уверенность модели для каждого бокса; если её нет — считаем 1.0
+            confs = boxes.conf.tolist() if boxes.conf is not None else [1.0] * len(coords)
+            for (x1, y1, x2, y2), conf in zip(coords, confs):
+                detections.append((x1, y1, x2, y2, conf))
 
         h, w = annotated.shape[:2]
         b_level = boundary_level(frame)              # доля черноты перед луноходом
@@ -100,6 +101,13 @@ def generate_frames():
         # уровень черноты — чтобы подбирать порог
         cv2.putText(
             annotated, f"dark: {b_level:.2f}", (20, 95),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2
+        )
+        # уверенность выбранной цели и текущий порог — чтобы подбирать порог
+        best = choose_target(detections)
+        best_conf = box_confidence(best) if best is not None else 0.0
+        cv2.putText(
+            annotated, f"conf: {best_conf:.2f} / thr {CONFIDENCE_THRESHOLD:.2f}", (20, 135),
             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2
         )
         # ------------------------------------------------------------
