@@ -2,12 +2,19 @@ from flask import Flask, Response
 from picamera2 import Picamera2
 from ultralytics import YOLO
 import cv2
-from navigation import decide, target_angle, choose_target, box_confidence, CONFIDENCE_THRESHOLD
+from navigation import decide, target_angle
 from libcamera import controls
 import numpy as np
 
+# автонастройка камеры под освещение + проверка синего по HSV
+from camera_setup import auto_calibrate, recalibrate_on_demand, blue_fraction
+
+from navigation import decide   # наш "мозг"
 
 
+# --- Фильтр "реально ли синий" -------------------------------------------
+USE_BLUE_FILTER = True     # отсекать боксы YOLO, в которых мало синего
+BLUE_MIN_FRACTION = 0.20   # минимальная доля синих пикселей в боксе (0..1)
 
 
 app = Flask(__name__)
@@ -19,13 +26,10 @@ picam2.configure(config)
 picam2.start()
 
 
-
-# Баланс белого под студийный белый свет
-# Ручной баланс белого — убираем синеву напрямую
-picam2.set_controls({
-    "AwbEnable": False,
-    "ColourGains": (2.0, 1.2)
-})
+# Автокалибровка баланса белого / экспозиции под ТЕКУЩИЙ свет.
+# (вместо ручного ColourGains, который душил синий и плыл при смене света).
+# Наведи камеру на нейтральный фон — белый/серый лист — на момент старта.
+auto_calibrate(picam2, settle_seconds=2.0)
 
 # YOLO модель
 model = YOLO("best.pt")
@@ -74,15 +78,18 @@ def generate_frames():
 
         annotated = results[0].plot()
 
-        #  достаём координаты боксов + уверенность YOLO и спрашиваем "мозг"
+        #  достаём координаты боксов и спрашиваем "мозг".
+        #  каждый бокс проверяем по доле синего — отсекаем не-синие ложные.
         detections = []
+        best_blue = 0.0
         boxes = results[0].boxes
         if boxes is not None and boxes.xyxy is not None:
-            coords = boxes.xyxy.tolist()
-            # уверенность модели для каждого бокса; если её нет — считаем 1.0
-            confs = boxes.conf.tolist() if boxes.conf is not None else [1.0] * len(coords)
-            for (x1, y1, x2, y2), conf in zip(coords, confs):
-                detections.append((x1, y1, x2, y2, conf))
+            for x1, y1, x2, y2 in boxes.xyxy.tolist():
+                bf = blue_fraction(frame, (x1, y1, x2, y2))
+                best_blue = max(best_blue, bf)
+                if USE_BLUE_FILTER and bf < BLUE_MIN_FRACTION:
+                    continue                 # мало синего -> не наш образец
+                detections.append((x1, y1, x2, y2))
 
         h, w = annotated.shape[:2]
         b_level = boundary_level(frame)              # доля черноты перед луноходом
@@ -103,12 +110,10 @@ def generate_frames():
             annotated, f"dark: {b_level:.2f}", (20, 95),
             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2
         )
-        # уверенность выбранной цели и текущий порог — чтобы подбирать порог
-        best = choose_target(detections)
-        best_conf = box_confidence(best) if best is not None else 0.0
+        # доля синего у самого "синего" бокса — чтобы подбирать BLUE_MIN_FRACTION
         cv2.putText(
-            annotated, f"conf: {best_conf:.2f} / thr {CONFIDENCE_THRESHOLD:.2f}", (20, 135),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2
+            annotated, f"blue: {best_blue:.2f} / min {BLUE_MIN_FRACTION:.2f}", (20, 135),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2
         )
         # ------------------------------------------------------------
 
@@ -125,6 +130,12 @@ def video():
     return Response(generate_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route('/calibrate')
+def calibrate():
+    # пере-калибровать камеру под текущий свет (наведи на белый/серый лист)
+    locked = recalibrate_on_demand(picam2)
+    return f"Калибровка обновлена: {locked}"
+
 @app.route('/')
 def index():
     return '''
@@ -132,6 +143,7 @@ def index():
         <body>
             <h1>YOLO Camera Stream</h1>
             <img src="/video" width="640">
+            <p><a href="/calibrate">Пере-калибровать камеру</a></p>
         </body>
     </html>
     '''
