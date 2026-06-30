@@ -6,6 +6,11 @@ venv/
 __pycache__/
 *.pyc
 
+#ai модель
+best.pt
+*.pt
+
 # Системные файлы
 .DS_Store
 *.log
+ 
