@@ -1,27 +1,19 @@
 """
-Модуль навигации ("мозг") лунохода.
-Принимает координаты ресурсов от YOLO + уровень границы и решает, что делать.
-Пока НЕ управляет моторами — только возвращает решение.
-
-Детекция теперь может нести уверенность YOLO:
-    (x1, y1, x2, y2)            — без уверенности (считается надёжной, conf=1.0)
-    (x1, y1, x2, y2, conf)      — с уверенностью YOLO в диапазоне [0..1]
-
-Цели с уверенностью ниже CONFIDENCE_THRESHOLD отбрасываются ещё до выбора —
-луноход не реагирует на ненадёжные срабатывания (блики, тени, шум модели).
+Модуль навигации — сенсорные функции ("глаза") лунохода.
+Отвечает на вопросы: где цель, под каким углом, как далеко.
+Решения НЕ принимает — это делает state_machine.py.
 """
 
 import math
-
-DEADZONE = 0.15        # доля ширины кадра по центру, где цель считаем "по центру"
-COLLECT_AREA = 0.10    # если бокс больше этой доли площади кадра — цель близко, собираем
-BOUNDARY_LEVEL = 0.15  # если доля "чёрного" перед луноходом >= этого — уходим от границы
 
 # Порог уверенности: детекции YOLO слабее этого значения игнорируются.
 CONFIDENCE_THRESHOLD = 0.5
 
 # Горизонтальный угол обзора камеры в градусах (Camera Module 3 Wide — 102°).
 CAMERA_HFOV = 102.0
+
+# Реальный диаметр додекаэдра (ребро 1.5 см → описанная сфера ~4.2 см).
+TARGET_REAL_SIZE = 0.042  # метры
 
 
 def _coords(box):
@@ -40,8 +32,7 @@ def filter_confident(detections, threshold=CONFIDENCE_THRESHOLD):
 
 
 def choose_target(detections, threshold=CONFIDENCE_THRESHOLD):
-    """Выбирает ОДНУ цель — самую близкую (по размеру бокса) среди надёжных.
-    Возвращает None, если уверенных детекций нет."""
+    """Выбирает ОДНУ цель — самую близкую (по размеру бокса) среди надёжных."""
     confident = filter_confident(detections, threshold)
     if not confident:
         return None
@@ -77,40 +68,25 @@ def target_angle(detections, frame_width, hfov=CAMERA_HFOV,
     return math.degrees(angle_rad)
 
 
-def decide(detections, frame_width, frame_height, boundary_level=0.0,
-           confidence_threshold=CONFIDENCE_THRESHOLD):
+def target_distance(detections, frame_width, hfov=CAMERA_HFOV,
+                    real_size=TARGET_REAL_SIZE,
+                    threshold=CONFIDENCE_THRESHOLD):
     """
-    Главная функция "мозга".
-    boundary_level — доля тёмных пикселей перед луноходом (0..1).
-    confidence_threshold — порог уверенности для детекций YOLO.
-    Возвращает: 'AVOID', 'SEARCH', 'LEFT', 'RIGHT', 'FORWARD' или 'COLLECT'.
+    Расстояние до цели в метрах (приблизительное).
+    Точность ~10-20% — достаточно для 'далеко/средне/близко/пора собирать'.
+    None если цели нет.
     """
-    # ГРАНИЦА — высший приоритет, перебивает всё остальное
-    if boundary_level >= BOUNDARY_LEVEL:
-        return "AVOID"
-
-    target = choose_target(detections, confidence_threshold)
+    target = choose_target(detections, threshold)
     if target is None:
-        # Надёжной цели нет (или все ниже порога) — переходим к поиску.
-        return "SEARCH"
+        return None
 
     x1, y1, x2, y2 = _coords(target)
+    box_width_px = x2 - x1
 
-    box_area = (x2 - x1) * (y2 - y1)
-    frame_area = frame_width * frame_height
-    closeness = box_area / frame_area
+    if box_width_px <= 0:
+        return None
 
-    if closeness >= COLLECT_AREA:
-        return "COLLECT"
+    half_hfov = math.radians(hfov / 2)
+    focal_px = (frame_width / 2) / math.tan(half_hfov)
 
-    target_cx = (x1 + x2) / 2
-    frame_cx = frame_width / 2
-    offset = target_cx - frame_cx
-    dead_px = DEADZONE * frame_width
-
-    if offset < -dead_px:
-        return "LEFT"
-    elif offset > dead_px:
-        return "RIGHT"
-    else:
-        return "FORWARD"
+    return (real_size * focal_px) / box_width_px
