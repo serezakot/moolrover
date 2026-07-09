@@ -6,7 +6,7 @@ MEMORY
 
 /*Точка входа*/
 
-ENTRY(Reset_handler)
+ENTRY(Reset_Handler)
 
 SECTIONS
 {
@@ -36,6 +36,8 @@ SECTIONS
 		. = ALIGN(4);
 		_edata = .; /*Маркер конца секции .data в RAM*/	
 	} > RAM AT> FLASH /*Храняться во ФЛЕШЕ но работают В РАМ !!*/
+	
+	_sidata = LOADADDR(.data);
 
 	.bss : /*Секция неинициализированых переменных (должна быть в 0)*/
 	{
