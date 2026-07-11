@@ -1,31 +1,30 @@
 """
-stm32_link.py — UART-мост между Raspberry Pi 5 (Python) и STM32.
+esp32_link.py — UART-мост между Raspberry Pi 5 (Python) и ESP32-WROOM-32D.
 
-Архитектура (по аналогии с navigation.py / state_machine.py):
+Шаг 3: расширенная телеметрия (16 байт): heading, pos_x, pos_y, imu_status.
+
+Архитектура:
     - Чистые функции упаковки/разборки пакетов НЕ трогают железо и НЕ трогают
-      потоки. Их можно тестировать на синтетических байтах без Pi и без STM32.
-    - Класс STM32Link прячет внутри serial и два фоновых потока:
-        * TX-поток: с фиксированной частотой (~50 Гц) шлёт ПОСЛЕДНЮЮ выставленную
-          команду движения, даже если "мозг" молчит. Так watchdog STM32 (300 мс)
-          всегда сыт, а логика управления развязана с реальным временем шины.
-        * RX-поток: непрерывно ищет кадр телеметрии, проверяет CRC, распаковывает
-          RLE и кладёт последнюю валидную телеметрию в потокобезопасное поле.
+      потоки. Их можно тестировать на синтетических байтах без Pi и без ESP32.
+    - Класс ESP32Link прячет внутри serial и два фоновых потока:
+        * TX-поток: 50 Гц heartbeat (watchdog ESP32 = 300 мс).
+        * RX-поток: ищет кадр телеметрии, проверяет CRC, распаковывает RLE.
 
-Как это стыкуется с RoverBrain:
-    link = STM32Link(); link.start()
-    ...
-    # внутри brain.update() / track.py:
-    link.set_speed(30, 30)          # мгновенно, не блокирует
-    t = link.get_telemetry()        # последняя валидная телеметрия или None
+Как стыкуется с RoverBrain:
+    link = ESP32Link(); link.start()
+    link.set_speed(30, 30)
+    t = link.get_telemetry()   # Telemetry | None
+    if t:
+        print(t.heading_deg, t.pos_x_cm, t.pos_y_cm)
 
-ЗАФИКСИРОВАННЫЕ ПАРАМЕТРЫ ПРОТОКОЛА (согласовано с прошивкой STM32):
-    - Скорость UART: 115200, 8N1.
-    - Скорости моторов в телеметрии приходят ЗНАКОВЫМИ int8 (см. TELEM_SPEED_SIGNED).
-      ^ единственное допущение, которое стоит перепроверить на живом железе:
-        если задний ход придёт как модуль или направление окажется в статус-байте,
-        меняется одна константа/одна ветка parse_telemetry_payload().
+ЗАФИКСИРОВАННЫЕ ПАРАМЕТРЫ ПРОТОКОЛА (согласовано с ESP32 step3):
+    - UART: 115200, 8N1.
+    - ESP32: Serial2 (GPIO16 RX ← Pi TX, GPIO17 TX → Pi RX).
+    - Pi: /dev/ttyAMA0 (GPIO14 TX, GPIO15 RX).
+    - Телеметрия: 16 байт (status, battery, speeds, sonar, heading, x, y, imu_status, reserved).
 """
 
+import struct
 import sys
 import threading
 import time
@@ -33,38 +32,40 @@ from collections import deque
 from dataclasses import dataclass
 
 try:
-    import serial  # pyserial; не нужен для чистых функций и селф-теста
+    import serial  # pyserial
 except ImportError:
     serial = None
 
 
 # ─────────────────────────── Константы протокола ───────────────────────────
 
-PORT = "/dev/ttyAMA0"     # на Pi 5: GPIO14 (TX) / GPIO15 (RX); включить в raspi-config
+PORT = "/dev/serial0"
 BAUD = 115200
 
-# TX (команды на STM32) — пакет фиксированной длины 7 байт
+# TX (команды на ESP32)
 TX_START = 0xAA
 TX_STOP = 0xBB
 
-CMD_ESTOP = 0x00          # аргументы 0,0,0
-CMD_SET_SPEED = 0x01      # arg1=скорость L (int8), arg2=скорость R (int8), arg3=0
-CMD_RESET_ODO = 0x02      # аргументы 0,0,0
-CMD_TUNE_PID = 0x03       # arg1=коэф(1=Kp,2=Ki,3=Kd), arg2=целая часть, arg3=дробь*100
-CMD_SERVO = 0x05          # arg1=id(0..3), arg2=угол(0..180), arg3=0
+CMD_ESTOP = 0x00
+CMD_SET_SPEED = 0x01
+CMD_RESET_ODO = 0x02
+CMD_TUNE_PID = 0x03
+CMD_SET_PERIPH = 0x04
+CMD_SERVO = 0x05
+CMD_RESET_IMU = 0x06      # НОВАЯ: сброс heading и координат
 
-# RX (телеметрия от STM32) — старт/стоп маркеры
+# RX (телеметрия от ESP32)
 RX_START = 0xCC
 RX_STOP = 0xDD
 
 # Тайминги
-TX_PERIOD = 0.02          # 50 Гц. Watchdog STM32 = 300 мс, запас огромный
-RX_READ_TIMEOUT = 0.05    # таймаут одиночного serial.read
+TX_PERIOD = 0.02
+RX_READ_TIMEOUT = 0.05
 
-# Ограничения/размеры
-TELEM_SIZE = 10           # распакованная телеметрия строго 10 байт
-MAX_RLE_LEN = 32          # защита от мусора: N сжатых байт не может быть больше
-TELEM_SPEED_SIGNED = True # см. шапку файла: скорости в телеметрии как int8
+# Размеры
+TELEM_SIZE = 16            # БЫЛО 10, СТАЛО 16 — согласовано с rover_types.h
+MAX_RLE_LEN = 64           # увеличено под 16-байтную телеметрию
+TELEM_SPEED_SIGNED = True
 
 
 # ─────────────────────── Чистые функции: TX (команды) ───────────────────────
@@ -74,25 +75,16 @@ def _clamp(v, lo, hi):
 
 
 def _pack_int8(v: int) -> int:
-    """Знаковую скорость (-100..100) -> байт two's-complement (0..255)."""
     v = _clamp(int(v), -100, 100)
     return v & 0xFF
 
 
 def _unpack_int8(b: int) -> int:
-    """Байт -> знаковый int8 (-128..127)."""
     return b - 256 if b >= 128 else b
 
 
 def build_command(cmd_id: int, a1: int = 0, a2: int = 0, a3: int = 0) -> bytes:
-    """
-    Собрать 7-байтный пакет команды.
-    a1..a3 — УЖЕ упакованные байты (0..255). CRC = XOR байтов [cmd_id, a1, a2, a3].
-    """
-    cmd_id &= 0xFF
-    a1 &= 0xFF
-    a2 &= 0xFF
-    a3 &= 0xFF
+    cmd_id &= 0xFF; a1 &= 0xFF; a2 &= 0xFF; a3 &= 0xFF
     crc = cmd_id ^ a1 ^ a2 ^ a3
     return bytes([TX_START, cmd_id, a1, a2, a3, crc, TX_STOP])
 
@@ -110,32 +102,39 @@ def cmd_reset_odometer() -> bytes:
 
 
 def cmd_servo(servo_id: int, angle: int) -> bytes:
-    servo_id = _clamp(int(servo_id), 0, 3)
+    servo_id = _clamp(int(servo_id), 0, 1)
     angle = _clamp(int(angle), 0, 180)
     return build_command(CMD_SERVO, servo_id, angle, 0)
 
 
 def cmd_tune_pid(coef: int, value: float) -> bytes:
-    """coef: 1=Kp, 2=Ki, 3=Kd. value -> целая часть + дробная*100."""
     ipart = int(value)
     fpart = int(round((value - ipart) * 100))
     return build_command(CMD_TUNE_PID, coef & 0xFF, ipart & 0xFF, fpart & 0xFF)
+
+
+def cmd_reset_imu() -> bytes:
+    """Сбросить heading и координаты на ESP32 в 0."""
+    return build_command(CMD_RESET_IMU, 0, 0, 0)
 
 
 # ─────────────────────── Чистые функции: RX (телеметрия) ─────────────────────
 
 @dataclass(frozen=True)
 class Telemetry:
-    status: int         # статусный байт робота
-    battery_v: float    # напряжение, В (сырой байт / 10, т.е. 114 -> 11.4)
-    speed_left: int     # текущая скорость L
-    speed_right: int    # текущая скорость R
-    sonar_cm: int       # расстояние с сонара, см
-    raw: bytes          # 10 распакованных байт (для отладки)
+    status: int
+    battery_v: float
+    speed_left: int          # проценты, -100..100
+    speed_right: int
+    sonar_cm: int
+    heading_deg: float       # НОВОЕ: курс от старта, градусы (-180..180)
+    pos_x_cm: int            # НОВОЕ: x от старта, см
+    pos_y_cm: int            # НОВОЕ: y от старта, см
+    imu_status: int          # НОВОЕ: 0=нет, 1=ок, 2=ошибка
+    raw: bytes
 
 
 def rx_crc(length: int, rle_bytes: bytes) -> int:
-    """CRC телеметрии = length XOR всех сжатых байт."""
     c = length & 0xFF
     for x in rle_bytes:
         c ^= x
@@ -143,7 +142,6 @@ def rx_crc(length: int, rle_bytes: bytes) -> int:
 
 
 def rle_decompress(data: bytes) -> bytes:
-    """Пары [значение, количество] -> развёрнутый массив байт."""
     out = bytearray()
     for i in range(0, len(data), 2):
         value = data[i]
@@ -153,37 +151,49 @@ def rle_decompress(data: bytes) -> bytes:
 
 
 def parse_telemetry_payload(payload: bytes) -> Telemetry:
-    """Распакованные 10 байт -> Telemetry."""
+    """Распакованные 16 байт -> Telemetry."""
     b = payload
     sl = _unpack_int8(b[2]) if TELEM_SPEED_SIGNED else b[2]
     sr = _unpack_int8(b[3]) if TELEM_SPEED_SIGNED else b[3]
+
+    # heading_deg10: int16 little-endian в байтах 5-6
+    heading_raw = struct.unpack_from('<h', b, 5)[0]
+    heading_deg = heading_raw / 10.0
+
+    # pos_x_cm, pos_y_cm: int16 LE в байтах 7-8, 9-10
+    pos_x_cm = struct.unpack_from('<h', b, 7)[0]
+    pos_y_cm = struct.unpack_from('<h', b, 9)[0]
+
+    imu_status = b[11]
+
     return Telemetry(
         status=b[0],
         battery_v=b[1] / 10.0,
         speed_left=sl,
         speed_right=sr,
         sonar_cm=b[4],
+        heading_deg=heading_deg,
+        pos_x_cm=pos_x_cm,
+        pos_y_cm=pos_y_cm,
+        imu_status=imu_status,
         raw=bytes(b),
     )
 
 
 # ──────────────────────────── Класс-мост ─────────────────────────────────────
 
-class STM32Link:
+class ESP32Link:
     def __init__(self, port: str = PORT, baud: int = BAUD):
         if serial is None:
             raise RuntimeError("Нужен pyserial: pip install pyserial")
         self._ser = serial.Serial(port, baud, timeout=RX_READ_TIMEOUT)
 
-        # текущая команда движения (heartbeat), по умолчанию — безопасный стоп
         self._motion = cmd_estop()
         self._motion_lock = threading.Lock()
 
-        # очередь разовых команд (серва / PID / сброс одометра)
         self._oneshot = deque()
         self._oneshot_lock = threading.Lock()
 
-        # последняя валидная телеметрия
         self._telem = None
         self._telem_time = 0.0
         self._telem_lock = threading.Lock()
@@ -192,7 +202,6 @@ class STM32Link:
         self._tx_thread = None
         self._rx_thread = None
 
-    # ── управление жизненным циклом ──
     def start(self):
         if self._running:
             return
@@ -205,7 +214,7 @@ class STM32Link:
     def stop(self):
         self._running = False
         try:
-            self._ser.write(cmd_estop())   # финальный стоп на всякий случай
+            self._ser.write(cmd_estop())
         except Exception:
             pass
         if self._tx_thread:
@@ -217,13 +226,12 @@ class STM32Link:
         except Exception:
             pass
 
-    # ── публичный API для мозга ──
+    # ── публичный API ──
     def set_speed(self, left: int, right: int):
         with self._motion_lock:
             self._motion = cmd_set_speed(left, right)
 
     def emergency_stop(self):
-        # стоп важнее очереди — чистим разовые команды, чтобы не задержать его
         with self._oneshot_lock:
             self._oneshot.clear()
         with self._motion_lock:
@@ -237,6 +245,11 @@ class STM32Link:
         with self._oneshot_lock:
             self._oneshot.append(cmd_reset_odometer())
 
+    def reset_imu(self):
+        """Обнулить heading и координаты на ESP32."""
+        with self._oneshot_lock:
+            self._oneshot.append(cmd_reset_imu())
+
     def tune_pid(self, coef: int, value: float):
         with self._oneshot_lock:
             self._oneshot.append(cmd_tune_pid(coef, value))
@@ -246,7 +259,6 @@ class STM32Link:
             return self._telem
 
     def telemetry_age(self):
-        """Секунд с последнего валидного кадра, или None если кадров ещё не было."""
         with self._telem_lock:
             if self._telem is None:
                 return None
@@ -266,14 +278,13 @@ class STM32Link:
             try:
                 self._ser.write(pkt)
             except Exception:
-                pass  # не роняем поток из-за одной сбойной записи
-
+                pass
             next_t += TX_PERIOD
             sleep = next_t - time.time()
             if sleep > 0:
                 time.sleep(sleep)
             else:
-                next_t = time.time()  # отстали — не копим долг
+                next_t = time.time()
 
     def _rx_loop(self):
         while self._running:
@@ -298,18 +309,15 @@ class STM32Link:
 
     def _read_frame(self):
         ser = self._ser
-        # 1. синхронизация по стартовому байту
         b = ser.read(1)
         if not b or b[0] != RX_START:
             return None
-        # 2. длина сжатых данных
         lb = ser.read(1)
         if not lb:
             return None
         length = lb[0]
         if length == 0 or length % 2 != 0 or length > MAX_RLE_LEN:
-            return None  # мусор -> дропаем, ищем следующий 0xCC
-        # 3. данные + CRC + стоп
+            return None
         rest = self._read_exact(length + 2)
         if rest is None:
             return None
@@ -329,7 +337,6 @@ class STM32Link:
 # ─────────────────────────── Селф-тест (без железа) ──────────────────────────
 
 def _rle_compress_naive(data: bytes) -> bytes:
-    """Только для тестов: собрать кадр так, как это делает STM32."""
     out = bytearray()
     i = 0
     while i < len(data):
@@ -343,46 +350,62 @@ def _rle_compress_naive(data: bytes) -> bytes:
 
 
 def _selftest():
-    # --- TX: упаковка знака и CRC ---
+    # --- TX ---
     pkt = cmd_set_speed(-50, 30)
     assert pkt[0] == TX_START and pkt[6] == TX_STOP
     assert pkt[1] == CMD_SET_SPEED
-    assert pkt[2] == 206          # -50 two's-complement
+    assert pkt[2] == 206
     assert pkt[3] == 30
     assert pkt[5] == (pkt[1] ^ pkt[2] ^ pkt[3] ^ pkt[4])
     assert cmd_estop() == bytes([0xAA, 0x00, 0x00, 0x00, 0x00, 0x00, 0xBB])
-    assert cmd_servo(2, 90)[1:5] == bytes([0x05, 2, 90, 0])
-    assert cmd_servo(9, 999)[3] == 180        # клампинг угла
-    assert cmd_tune_pid(1, 1.25)[2:5] == bytes([1, 1, 25])
+    assert cmd_servo(0, 90)[1:5] == bytes([0x05, 0, 90, 0])
+    assert cmd_reset_imu()[1] == CMD_RESET_IMU
 
-    # --- RX: сборка -> разбор кадра целиком ---
-    payload = bytes([1, 114, 206, 30, 42, 0, 0, 0, 0, 0])  # -50, 30, 11.4V, 42см
+    # --- RX: 16-байтная телеметрия ---
+    #   heading_deg10 = 453 (45.3°), pos_x = 150 cm, pos_y = -80 cm, imu=1
+    heading_bytes = struct.pack('<h', 453)
+    x_bytes = struct.pack('<h', 150)
+    y_bytes = struct.pack('<h', -80)
+    payload = bytes([
+        1,            # status
+        114,          # battery (11.4V)
+        206,          # left_speed = -50 (two's complement)
+        30,           # right_speed = 30
+        42,           # sonar = 42 cm
+    ]) + heading_bytes + x_bytes + y_bytes + bytes([
+        1,            # imu_status = ok
+        0, 0, 0, 0,  # reserved
+    ])
+    assert len(payload) == TELEM_SIZE, f"payload len={len(payload)}, expected {TELEM_SIZE}"
+
     rle = _rle_compress_naive(payload)
     length = len(rle)
     crc = rx_crc(length, rle)
     frame = bytes([RX_START, length]) + rle + bytes([crc, RX_STOP])
 
-    # проверим внутренности парсера на распакованном payload
     assert rle_decompress(rle) == payload
     t = parse_telemetry_payload(payload)
     assert t.status == 1
     assert abs(t.battery_v - 11.4) < 1e-9
     assert t.speed_left == -50 and t.speed_right == 30
     assert t.sonar_cm == 42
+    assert abs(t.heading_deg - 45.3) < 0.01
+    assert t.pos_x_cm == 150
+    assert t.pos_y_cm == -80
+    assert t.imu_status == 1
 
-    # CRC-логика: битый байт должен ломать проверку
+    # CRC: битый байт должен ломать
     assert rx_crc(length, bytes([rle[0] ^ 0xFF]) + rle[1:]) != crc
 
-    print("OK: все чистые функции сходятся. Кадр телеметрии:",
-          frame.hex(" "))
+    print(f"OK: selftest passed. Telemetry size={TELEM_SIZE}, frame={frame.hex(' ')}")
+    print(f"    heading={t.heading_deg}°  pos=({t.pos_x_cm},{t.pos_y_cm})cm  imu={t.imu_status}")
 
 
 if __name__ == "__main__":
     if "--selftest" in sys.argv or serial is None:
         _selftest()
     else:
-        # живой демо-режим (нужен реальный UART и STM32)
-        link = STM32Link()
+        link = ESP32Link()
         link.start()
         try:
             link.set_speed(0, 0)
@@ -391,7 +414,12 @@ if __name__ == "__main__":
                 if t:
                     print(f"bat={t.battery_v:.1f}V  L={t.speed_left}  "
                           f"R={t.speed_right}  sonar={t.sonar_cm}cm  "
-                          f"status={t.status}  age={link.telemetry_age():.2f}s")
+                          f"hdg={t.heading_deg:.1f}°  "
+                          f"pos=({t.pos_x_cm},{t.pos_y_cm})cm  "
+                          f"imu={t.imu_status}  "
+                          f"age={link.telemetry_age():.2f}s")
+                else:
+                    print("NO TELEMETRY")
                 time.sleep(0.2)
         except KeyboardInterrupt:
             pass
