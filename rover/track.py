@@ -14,6 +14,7 @@ from camera_setup import auto_calibrate, recalibrate_on_demand, blue_fraction
 # автомат ("мозг" с памятью)
 from state_machine import RoverBrain
 from stm32_link import STM32Link
+from esp32_link import ESP32Link
 from motor_controller import command_to_speed
 
 # --- Фильтр "реально ли синий" -------------------------------------------
@@ -43,9 +44,17 @@ if not boundary_cam.isOpened():
     )
     
 # Связь с моторами через STM32
+"""
 link = STM32Link()
 link.start()
 print("[motors] STM32 link started")
+"""
+
+# СВЯЗЬ ЧЕРЕЗ ESP32 
+link = ESP32Link()
+link.start()
+print("[motors] ESP32 link started")
+
     
 # YOLO модель
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -249,12 +258,12 @@ def generate_frames():
         if telem:
             cv2.putText(
                 annotated,
-                f"STM: bat={telem.battery_v:.1f}V L={telem.speed_left} R={telem.speed_right} age={telem_age:.1f}s",
+                f"ESP: bat={telem.battery_v:.1f}V L={telem.speed_left} R={telem.speed_right} age={telem_age:.1f}s",
                 (20, 255), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (100, 255, 100), 2
             )
         else:
             cv2.putText(
-                annotated, "STM: NO TELEMETRY",
+                annotated, "ESP: NO TELEMETRY",
                 (20, 255), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2
             )
 
