@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 680" width="1100" height="680" font-family="Helvetica, Arial, sans-serif">
+<defs><pattern id="facets" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M0 0L40 40M40 0L0 40M0 20H40M20 0V40" stroke="#000" stroke-opacity="0.22" stroke-width="1"/></pattern></defs>
+<rect width="1100" height="680" rx="14" fill="#15181c"/>
+<text x="550.0" y="34" fill="#f0f0f0" font-size="20" font-weight="700" text-anchor="middle">Competition field — EnduroSat Endurance Space Race 2026</text>
+<text x="550.0" y="56" fill="#9aa4ae" font-size="13" text-anchor="middle">schematic top view · dimensions from the official rules</text>
+<rect x="30" y="80" width="1000" height="500" fill="#2e3338" />
+<rect x="50" y="100" width="960" height="460" fill="#131313" />
+<rect x="70" y="120" width="920" height="420" fill="#e9ecef" />
+<rect x="80" y="130" width="900" height="400" fill="#5a5a5a" />
+<rect x="180" y="130" width="800" height="400" fill="url(#facets)" />
+<line x1="180" y1="130" x2="180" y2="530" stroke="#d0d4d8" stroke-width="2" stroke-dasharray="7 6"/>
+<rect x="50" y="300" width="20" height="60" fill="#EDA600" />
+<rect x="70" y="300" width="10" height="60" fill="#B30000" />
+<circle cx="244" cy="333" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="532" cy="170" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="525" cy="452" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="948" cy="161" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="422" cy="198" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="436" cy="448" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="646" cy="382" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="620" cy="167" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="441" cy="362" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="870" cy="415" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="951" cy="188" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="780" cy="201" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="639" cy="470" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="733" cy="365" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="563" cy="391" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="830" cy="250" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="712" cy="152" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="329" cy="188" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="788" cy="192" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="499" cy="468" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="877" cy="449" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="413" cy="298" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="877" cy="500" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="335" cy="230" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="571" cy="363" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="870" cy="441" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="324" cy="270" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="670" cy="199" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="466" cy="279" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="850" cy="513" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="571" cy="176" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="605" cy="199" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="861" cy="403" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="608" cy="434" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="853" cy="444" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="767" cy="228" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="472" cy="155" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="933" cy="310" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="957" cy="499" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<circle cx="369" cy="228" r="5" fill="#067EC8" stroke="#bfe3ff" stroke-width="1.2"/>
+<text x="130" y="310" fill="#f0f0f0" font-size="15" font-weight="700" text-anchor="middle">BASE</text>
+<text x="130" y="328" fill="#e6e6e6" font-size="12" font-weight="400" text-anchor="middle">50 × 200 cm</text>
+<text x="130" y="344" fill="#e6e6e6" font-size="12" font-weight="400" text-anchor="middle">flat</text>
+<text x="580" y="314" fill="#f0f0f0" font-size="20" font-weight="700" text-anchor="middle">RESOURCE FIELD</text>
+<text x="580" y="336" fill="#f2f2f2" font-size="13" font-weight="400" text-anchor="middle">400 × 200 cm · faceted terrain, slopes &lt; 30°</text>
+<line x1="50" y1="594" x2="1010" y2="594" stroke="#9aa4ae" stroke-width="1.2"/>
+<line x1="50" y1="588" x2="50" y2="600" stroke="#9aa4ae" stroke-width="1.2"/>
+<line x1="1010" y1="588" x2="1010" y2="600" stroke="#9aa4ae" stroke-width="1.2"/>
+<text x="530" y="588" fill="#c9d1d9" font-size="13" font-weight="400" text-anchor="middle">480 cm</text>
+<line x1="1032" y1="100" x2="1032" y2="560" stroke="#9aa4ae" stroke-width="1.2"/>
+<line x1="1026" y1="100" x2="1038" y2="100" stroke="#9aa4ae" stroke-width="1.2"/>
+<line x1="1026" y1="560" x2="1038" y2="560" stroke="#9aa4ae" stroke-width="1.2"/>
+<text x="1048" y="330" fill="#c9d1d9" font-size="13" text-anchor="middle" transform="rotate(90 1048 330)">230 cm</text>
+<rect x="50" y="612" width="16" height="16" rx="3" fill="#067EC8" stroke="#6e7781" stroke-width="1"/>
+<text x="74" y="625" fill="#d0d7de" font-size="13" font-weight="400" text-anchor="start">40 blue samples (dodecahedron, 1.5 cm edge)</text>
+<rect x="380" y="612" width="16" height="16" rx="3" fill="#EDA600" stroke="#6e7781" stroke-width="1"/>
+<text x="404" y="625" fill="#d0d7de" font-size="13" font-weight="400" text-anchor="start">Deposit pit 30 × 15 × 15 cm</text>
+<rect x="710" y="612" width="16" height="16" rx="3" fill="#B30000" stroke="#6e7781" stroke-width="1"/>
+<text x="734" y="625" fill="#d0d7de" font-size="13" font-weight="400" text-anchor="start">Pit edge (red)</text>
+<rect x="50" y="638" width="16" height="16" rx="3" fill="#e9ecef" stroke="#6e7781" stroke-width="1"/>
+<text x="74" y="651" fill="#d0d7de" font-size="13" font-weight="400" text-anchor="start">Retroreflective boundary, 5 cm</text>
+<rect x="380" y="638" width="16" height="16" rx="3" fill="#131313" stroke="#6e7781" stroke-width="1"/>
+<text x="404" y="651" fill="#d0d7de" font-size="13" font-weight="400" text-anchor="start">Penalty zone, matte black, 10 cm</text>
+<rect x="710" y="638" width="16" height="16" rx="3" fill="#2e3338" stroke="#6e7781" stroke-width="1"/>
+<text x="734" y="651" fill="#d0d7de" font-size="13" font-weight="400" text-anchor="start">Penalty wall</text>
+</svg>

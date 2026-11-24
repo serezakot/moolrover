@@ -1,0 +1,10 @@
+# Raspberry Pi 5, Raspberry Pi OS (Bookworm).
+# picamera2 / libcamera ставятся из apt, НЕ из pip:
+#   sudo apt install python3-picamera2
+# поэтому venv создаём с доступом к системным пакетам:
+#   python3 -m venv --system-site-packages venv && venv/bin/pip install -r requirements.txt
+flask
+numpy
+opencv-python
+pyserial
+ultralytics

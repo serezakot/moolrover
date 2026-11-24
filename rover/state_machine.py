@@ -5,13 +5,12 @@
 """
 
 import time
-from navigation import choose_target, target_angle, target_distance, _coords
+from navigation import choose_target, _coords
 
 
 # === Пороги решений ===
 DEADZONE = 0.15           # доля ширины кадра: цель "по центру"
 COLLECT_AREA = 0.10       # доля площади кадра: цель "близко, пора собирать"
-BOUNDARY_LEVEL = 0.15     # доля черноты: граница поля
 
 # === Тайминги ===
 ROUND_DURATION = 8 * 60   # длительность раунда (сек)
@@ -42,9 +41,9 @@ class RoverBrain:
         self.start_heading = None      # heading при старте (от IMU, потом)
 
     def start(self):
-        """Вызвать один раз при старте раунда (кнопка START)."""
+        """Старт (или перезапуск) раунда: сбрасываем ВСЁ состояние."""
+        self.__init__()
         self.start_time = time.time()
-        self.state = "SEARCH"
 
     def elapsed(self):
         """Сколько секунд прошло с начала раунда."""
@@ -63,6 +62,11 @@ class RoverBrain:
             return "STOP"
 
         if self.state == "DONE":
+            return "STOP"
+
+        # --- Время раунда вышло: стоп, что бы ни происходило ---
+        if self.time_left() <= 0:
+            self.state = "DONE"
             return "STOP"
 
         # --- Таймер RETURN ---
@@ -190,8 +194,13 @@ class RoverBrain:
         Граница ушла  → возвращаемся в прежнее состояние.
         """
         if boundary_side is None:
-            # чисто — граница ушла из кадра, продолжаем прежнее дело
-            self.state = self.prev_state
+            # чисто — граница ушла из кадра, продолжаем прежнее дело.
+            # Исключение — COLLECT: после разворота цель пропадёт из кадра,
+            # и _collect() ошибочно засчитал бы её как "подобранную".
+            if self.prev_state == "COLLECT":
+                self.state = "SEARCH"
+            else:
+                self.state = self.prev_state
             return "FORWARD"
 
         if boundary_side == "LEFT":

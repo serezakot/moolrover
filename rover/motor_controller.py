@@ -27,10 +27,9 @@ COMMAND_MAP = {
     "RETURN":     ( RETURN_SPEED,   RETURN_SPEED),  # пока прямо (IMU потом)
     "DEPOSIT":    ( 0,              0),             # стоим, серво работает
     "STOP":       ( 0,              0),
-    "AVOID":      ( TURN_SPEED,   -TURN_SPEED),    # на всякий случай
 }
 
 
 def command_to_speed(command: str) -> tuple:
-    """Команда автомата → (left_speed, right_speed)."""
+    """Команда автомата → (left_speed, right_speed). Неизвестная команда → стоп."""
     return COMMAND_MAP.get(command, (0, 0))
