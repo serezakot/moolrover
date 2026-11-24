@@ -6,8 +6,11 @@ stm32_link.py — UART-мост между Raspberry Pi 5 (Python) и STM32.
       потоки. Их можно тестировать на синтетических байтах без Pi и без STM32.
     - Класс STM32Link прячет внутри serial и два фоновых потока:
         * TX-поток: с фиксированной частотой (~50 Гц) шлёт ПОСЛЕДНЮЮ выставленную
-          команду движения, даже если "мозг" молчит. Так watchdog STM32 (300 мс)
-          всегда сыт, а логика управления развязана с реальным временем шины.
+          команду движения, даже если "мозг" думает медленнее (YOLO ~5 кадр/с).
+          Так watchdog STM32 (300 мс) всегда сыт, а логика управления развязана
+          с реальным временем шины. НО: если мозг не обновлял скорость дольше
+          MOTION_TIMEOUT (завис, упал поток, кончился цикл) — шлём СТОП, иначе
+          луноход ехал бы вслепую с последней командой бесконечно.
         * RX-поток: непрерывно ищет кадр телеметрии, проверяет CRC, распаковывает
           RLE и кладёт последнюю валидную телеметрию в потокобезопасное поле.
 
@@ -60,6 +63,7 @@ RX_STOP = 0xDD
 # Тайминги
 TX_PERIOD = 0.02          # 50 Гц. Watchdog STM32 = 300 мс, запас огромный
 RX_READ_TIMEOUT = 0.05    # таймаут одиночного serial.read
+MOTION_TIMEOUT = 0.5      # мозг молчит дольше этого -> вместо скорости шлём стоп
 
 # Ограничения/размеры
 TELEM_SIZE = 10           # распакованная телеметрия строго 10 байт
@@ -177,6 +181,7 @@ class STM32Link:
 
         # текущая команда движения (heartbeat), по умолчанию — безопасный стоп
         self._motion = cmd_estop()
+        self._motion_time = 0.0        # когда мозг последний раз вызвал set_speed
         self._motion_lock = threading.Lock()
 
         # очередь разовых команд (серва / PID / сброс одометра)
@@ -204,14 +209,16 @@ class STM32Link:
 
     def stop(self):
         self._running = False
-        try:
-            self._ser.write(cmd_estop())   # финальный стоп на всякий случай
-        except Exception:
-            pass
+        # сначала дожидаемся потоков, чтобы финальный стоп не перемешался
+        # на проводе с пакетом, который TX-поток пишет в этот момент
         if self._tx_thread:
             self._tx_thread.join(timeout=0.5)
         if self._rx_thread:
             self._rx_thread.join(timeout=0.5)
+        try:
+            self._ser.write(cmd_estop())   # финальный стоп на всякий случай
+        except Exception:
+            pass
         try:
             self._ser.close()
         except Exception:
@@ -221,6 +228,7 @@ class STM32Link:
     def set_speed(self, left: int, right: int):
         with self._motion_lock:
             self._motion = cmd_set_speed(left, right)
+            self._motion_time = time.time()
 
     def emergency_stop(self):
         # стоп важнее очереди — чистим разовые команды, чтобы не задержать его
@@ -262,7 +270,8 @@ class STM32Link:
                     pkt = self._oneshot.popleft()
             if pkt is None:
                 with self._motion_lock:
-                    pkt = self._motion
+                    stale = time.time() - self._motion_time > MOTION_TIMEOUT
+                    pkt = cmd_estop() if stale else self._motion
             try:
                 self._ser.write(pkt)
             except Exception:
