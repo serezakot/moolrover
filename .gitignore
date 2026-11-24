@@ -13,4 +13,11 @@ best.pt
 # Системные файлы
 .DS_Store
 *.log
- 
+.venv/
+
+# IDE
+.idea/
+
+# Сборка прошивки
+*.elf
+*.bin
