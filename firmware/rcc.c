@@ -8,9 +8,12 @@ void SystemClock_Config(void){
 	while(!(RCC->CR & RCC_CR_HSERDY));
 
 
+	//72 МГц требуют 2 такта ожидания флеша: LATENCY = 0b010.
+	//ВНИМАНИЕ: FLASH_ACR_LATENCY_1 — это БИТ 1 (=0x2 = два такта),
+	//а FLASH_ACR_LATENCY_2 — бит 2 (=0x4 = зарезервированное значение 100!).
 	FLASH->ACR |= FLASH_ACR_PRFTBE;
 	FLASH->ACR &= ~FLASH_ACR_LATENCY;
-	FLASH->ACR |= FLASH_ACR_LATENCY_2;
+	FLASH->ACR |= FLASH_ACR_LATENCY_1;
 
 
 	RCC->CFGR |= RCC_CFGR_HPRE_DIV1;

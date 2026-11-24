@@ -139,8 +139,8 @@ void Reset_Handler(void){
 	uint32_t *bss = &_sbss;
 	while (bss < &_ebss) *bss++ = 0;
 
-	/* 3. СЛЕДУЮЩИЙ ШАГ: здесь, до main(), должна встать настройка тактовой
-	      на 72 МГц (HSE+PLL). Пока её нет — чип на 8 МГц HSI. */
+	/* 3. Тактирование 72 МГц (HSE+PLL) настраивает первая строка main():
+	      SystemClock_Config() из rcc.c. */
 
 	main();
 

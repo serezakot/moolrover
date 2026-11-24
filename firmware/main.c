@@ -64,37 +64,45 @@
 #define CMD_SET_PERIPHERY 0x04
 #define CMD_CONTROL_SERVOS 0x05
 
-//atan2f 
-float atan2f(float y,float x){
-	float abs_y= y<0 ? -y:y;
-	float res;
-	if(x>y){
-		res=(y-x)/(y+x);
-		res =0.785398f - 0.785398f * res;
+void SystemClock_Config(void);//rcc.c: HSE 8 МГц -> PLL x9 -> 72 МГц
+
+//Быстрый atan2 без libm (math.h не линкуем). Ошибка < 0.3 градуса, результат в радианах.
+//Своё имя, а не atan2f: не конфликтует со встроенной функцией компилятора.
+float fast_atan2f(float y,float x){
+	const float PI_F=3.14159265f;
+	float ax= x<0 ? -x:x;
+	float ay= y<0 ? -y:y;
+	if(ax<1e-9f && ay<1e-9f) return 0.0f;
+
+	float z,a;
+	if(ax>=ay){
+		z=ay/ax;//z в [0,1]
+		a=z*(PI_F/4.0f)+0.273f*z*(1.0f-z);//atan(z)
 	}else{
-		res=(y+x)/(x-y);
-		res=2.35619f - 0.785398f * res;
-
+		z=ax/ay;
+		a=PI_F/2.0f-(z*(PI_F/4.0f)+0.273f*z*(1.0f-z));
 	}
-	return (y<0) ? -res:res;
-
+	if(x<0) a=PI_F-a;//2-я и 3-я четверти
+	return (y<0) ? -a:a;
 }
-
-
 
 
 //ENCODERS CONSTANTS
 
 #define TICKS_PER_REV 120.0f
-#define WHEEL_CIRCUMFERENCE 0.38683f//метров 
+#define WHEEL_CIRCUMFERENCE 0.38683f//метров
 
-//global speed variables
+//Raspberry шлёт скорость в ПРОЦЕНТАХ (-100..100), а энкодеры меряют м/с.
+//ПИД работает в процентах, поэтому измеренную скорость переводим в % от максимальной.
+#define MAX_WHEEL_SPEED_MPS 1.0f//скорость колеса при 100% ШИМ, м/с — ИЗМЕРИТЬ на стенде!
+
+//global speed variables (в процентах, -100..100)
 float target_speed_left=0.0f;
 float target_speed_right=0.0f;
 
 
 uint32_t last_packet_received_time =0;
-uint32_t current_system_time=0;
+volatile uint32_t current_system_time=0;//меняется в SysTick_Handler -> обязательно volatile
 
 #define UART_BUFER_SIZE 4096
 uint8_t raw_memory[UART_BUFER_SIZE];
@@ -238,7 +246,6 @@ typedef struct{
 
 
 void sent_to_usart1(uint8_t byte);
-void sent_to_usart2(uint8_t byte);
 
 void pack_data(compressed_rle_pair* dest,uint8_t comm,uint8_t count){
 	dest->command=comm;
@@ -310,15 +317,8 @@ void  send_to_raspbery_telemetry(raw_telemetry* raw_data){
 //MOTOR ARCHITECTURE
 //
 typedef struct{
-	float current_speed;
-	float odometer;
-
-	float mass;
-	float max_speed;
-	float k_motor_q;
-	float static_friction_q;
-	float k_viscous_q;
-
+	float current_speed;//м/с, по энкодеру
+	float odometer;//м
 }motor;
 
 typedef struct{
@@ -333,40 +333,25 @@ typedef struct{
 
 
 
-//Motor configration and algho
-void init_motor(motor* my_motor,float mass,float max_speed,float k_motor_q, float static_friction_q,float k_viscous_q)
+//Motor configration
+void init_motor(motor* my_motor)
 {
-	my_motor->mass=mass;
-	my_motor->max_speed=max_speed;
-
-	my_motor->k_motor_q=k_motor_q;
-	my_motor->static_friction_q=static_friction_q;
-	my_motor->k_viscous_q=k_viscous_q;
-
-
 	my_motor->odometer=0.0f;
 	my_motor->current_speed=0.0f;
-	
 }
-/* Симуляция работы мотора можно использовать как килер фичу для потна
-void motor_update(motor* my_motore,float pwm,float dt){
-	float motor_force,friction_force, acceleration;
 
-	//сила тяги попрорциональная шиму
-	motor_force=pwm*(my_motor->k_motor_q);
-	//сила сопротивления
-	friction_force=(my_motor->static_friction_q) + (my_motor->current_speed * my_motor->k_viscous_q);
-	//ускорение по ньютону
-	acceleration=(motor_force-friction_force)/(my_motor->mass);
-
-	my_motor->current_speed=accleration*dt;
-	if((my_motor->current_speed) > (my_motor->max_speed)) my_motor->current_speed=my_motor->max_speed;
-
-	my_motor->odometer=+my_motor->current_speed*dt;
-
-
+//м/с -> проценты от максимальной скорости (единицы, в которых работает ПИД и шлёт Raspberry)
+float speed_to_percent(float speed_mps){
+	return speed_mps*(100.0f/MAX_WHEEL_SPEED_MPS);
 }
-*/
+
+//float -> int8 с ограничением (прямой каст числа вне -128..127 — неопределённое поведение)
+int8_t clamp_to_int8(float v){
+	if(v>127.0f) return 127;
+	if(v<-128.0f) return -128;
+	return (int8_t)v;
+}
+
 //Pid configuration and algho
 void pid_init(pid_controller* pid,float Kp,float Ki,float Kd,float max_output,float min_output){
 	pid->Kp=Kp;
@@ -534,10 +519,6 @@ void sent_to_usart1(uint8_t byte){
 	while(!(USART1->SR & USART_SR_TXE));
 	USART1->DR=byte;
 }
-void sent_to_usart2(uint8_t byte){
-	while(!(USART2->SR & USART_SR_TXE));
-	USART2->DR=byte;
-}
 
 //MOTORS STM ARCHITECTURE
 
@@ -546,7 +527,7 @@ void init_motors(void){
 	RCC->APB2ENR |=RCC_APB2ENR_IOPAEN | RCC_APB2ENR_IOPBEN;
 	RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
 	
-	//PA 8 PA 7 ALTERNATE FUCNTION	
+	//PA6 (TIM3_CH1) PA7 (TIM3_CH2) ALTERNATE FUNCTION
 	GPIOA->CRL &= ~((0xf<<24)|(0xf<<28));
 	GPIOA->CRL |=((0xb<<24)|(0xb<<28));
 	
@@ -675,13 +656,16 @@ void update_motorss(float dt){
 	motor_left.odometer+=motor_left.current_speed*dt;
 	motor_right.odometer+=motor_right.current_speed*dt;
 
-	//переводим реал скорость в пид регуляторы)
-	
-	float pid_out_left=pid_compute(&pid_left,target_speed_left,motor_left.current_speed, dt);
-	float pid_out_rright=pid_compute(&pid_right,target_speed_right,motor_right.current_speed, dt);
+	//ПИД в процентах: уставка (%) от Raspberry vs измеренная скорость (%)
+	float pid_out_left=pid_compute(&pid_left,target_speed_left,speed_to_percent(motor_left.current_speed), dt);
+	float pid_out_right=pid_compute(&pid_right,target_speed_right,speed_to_percent(motor_right.current_speed), dt);
+
+	//команда "стоп" (скорость 0) — глушим мотор сразу, а не ждём, пока ПИД разрядит интеграл
+	if(target_speed_left==0.0f){ pid_out_left=0.0f; pid_left.Integral=0.0f; }
+	if(target_speed_right==0.0f){ pid_out_right=0.0f; pid_right.Integral=0.0f; }
 
 	//отправялем шим
-	drive_motors(pid_out_left,pid_out_rright);
+	drive_motors(pid_out_left,pid_out_right);
 }
 //SERVOS ARCHITECTURE
 
@@ -832,19 +816,23 @@ uint8_t i2c_burst_read(uint8_t dev_addr,uint8_t reg_addr,uint8_t* buf,uint8_t n)
 	return 1;
 }
 
-void init_imu_sensors(void){
+//возвращает 1, если MPU6050 ответил. Если нет — IMU не опрашиваем в цикле,
+//иначе каждые 20 мс висим на таймаутах I2C и тормозим ПИД моторов.
+uint8_t init_imu_sensors(void){
 	init_imu_i2c();
-	
+
 	//настройки МПУ6050
-	i2c_init(0x68,0x6b,0x00);//запускаем чип
+	uint8_t ok=i2c_init(0x68,0x6b,0x00);//запускаем чип
+	if(!ok) return 0;
 	i2c_init(0x68,0x1b,0x08);//гироскоп  режим +-500 градусов в сек
 	i2c_init(0x68,0x1c,0x08);//акселерометр в режиме 4г
 
 	//настройки HMCL883l
-	
-	i2c_init(0x1e,0x00,0x70);//8-average 15гц 
+
+	i2c_init(0x1e,0x00,0x70);//8-average 15гц
 	i2c_init(0x1e,0x01,0x20);//gain=1.3ga
-	i2c_init(0x1e,0x02,0x00);//Непрерывный режим измерения	
+	i2c_init(0x1e,0x02,0x00);//Непрерывный режим измерения
+	return 1;
 }
 
 
@@ -878,16 +866,30 @@ void imu_read_raw(void){
 	}
 }
 
+//угол в диапазон -180..180
+float wrap_deg(float a){
+	while(a>180.0f) a-=360.0f;
+	while(a<-180.0f) a+=360.0f;
+	return a;
+}
+
 //комплементарный фильтр курса: интеграл гироскопа + подмешивание магнитометра
 void imu_update(float dt){
 	imu_read_raw();
 	float gz_dps=((float)imu.gz)/GYRO_LSB_PER_DPS - robot_pose.gyro_bias_z;
-	float yaw_mag=atan2f((float)imu.my,(float)imu.mx)*(180.0f/3.14159265f);
-	robot_pose.yaw=COMP_ALPHA*(robot_pose.yaw+gz_dps*dt)+(1.0f-COMP_ALPHA)*yaw_mag;
+	float yaw_mag=fast_atan2f((float)imu.my,(float)imu.mx)*(180.0f/3.14159265f);
+	float yaw_gyro=robot_pose.yaw+gz_dps*dt;
+	//смешиваем по КРАТЧАЙШЕЙ разнице углов: иначе на переходе 179° -> -179°
+	//обычное взвешенное среднее тянет курс через 0 и он скачет
+	robot_pose.yaw=wrap_deg(yaw_gyro+(1.0f-COMP_ALPHA)*wrap_deg(yaw_mag-yaw_gyro));
 	imu.yaw=robot_pose.yaw;
 }
 
 int main(void){
+	//ПЕРВЫМ ДЕЛОМ — 72 МГц. Все константы ниже (UART 115200, SysTick 1 мс,
+	//ШИМ, серво, I2C) посчитаны под 72 МГц; без этого чип на 8 МГц и UART
+	//работает на 12800 бод вместо 115200 — Raspberry его не слышит.
+	SystemClock_Config();
 	SysTick_initialization();
 
 	init_buffer(&uart_ring,UART_BUFER_SIZE);
@@ -897,7 +899,7 @@ int main(void){
 	init_motors();
 	init_servos();
 	init_encoders();//ВРЕМЕННО на EXTI (см. заметку по задаче 1 — до перехода на таймеры)
-	init_imu_sensors();//IMU по I2C (теперь с таймаутами и реальной отправкой value)
+	uint8_t imu_ok=init_imu_sensors();//IMU по I2C (с таймаутами)
 
 
 	//math and pid`s init
@@ -906,8 +908,8 @@ int main(void){
 	pid_init(&pid_right,1.0f,0.2f,0.05f,100.0f,-100.0f);
 
 
-	init_motor(&motor_left,2.5f,100.0f,1.2f,5.0f,0.8f);
-	init_motor(&motor_right,2.5f,100.0f,1.2f,5.0f,0.8f);
+	init_motor(&motor_left);
+	init_motor(&motor_right);
 
 
 	//метки диспетчера
@@ -943,18 +945,19 @@ int main(void){
 
 
 		update_motorss(dt);
-		imu_update(dt);//обновляем курс по IMU в том же такте 20 мс
-		}	
+		if(imu_ok) imu_update(dt);//обновляем курс по IMU в том же такте 20 мс
+		}
 
 		// IV
 		if((now-last_telemetry_time)>=100){
 			last_telemetry_time=now;
 
 			telemetry_packet.status=0x01;
-			telemetry_packet.battery=114;
-			telemetry_packet.left_speed=(int8_t)motor_left.current_speed;
-			telemetry_packet.right_speed=(int8_t)motor_right.current_speed;
-			telemetry_packet.sonar_distance=50;
+			telemetry_packet.battery=114;//ЗАГЛУШКА: АЦП батареи ещё не подключён
+			//скорость в % — те же единицы, в которых Raspberry шлёт команды
+			telemetry_packet.left_speed=clamp_to_int8(speed_to_percent(motor_left.current_speed));
+			telemetry_packet.right_speed=clamp_to_int8(speed_to_percent(motor_right.current_speed));
+			telemetry_packet.sonar_distance=50;//ЗАГЛУШКА: сонар ещё не подключён
 
 			send_to_raspbery_telemetry(&telemetry_packet);
 		}	
